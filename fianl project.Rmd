@@ -1,0 +1,374 @@
+---
+title: "Exploratory Analysis and Price Prediction of Beijing Housing"
+output:
+  word_document: default
+  html_document: default
+  pdf_document: 
+    latex_engine: xelatex
+---
+# Data Access
+
+## 1.1 Project Overview 
+This class project is designed for us to become productive with the application of our new data science skills into real-life working. Data used for the alternative class project is related to housing prices in Califonia and this is then interesting to take a look at the housing prices in my home country, China since the housing market in China has bloomed for these years. The variation between the home's prices is quite huge among different regions and years. I found one dataset on [Kaggle.com] which contains housing prices of Beijing from 2011 to 2017, fetching from [Lianjia.com] and it contains over 300 thousand transaction records by Lianjia, one of the biggest Chinese real-estate brokerage company founded in 2001. 
+Therefore, the main objective of this project is to predict the housing price values in Beijing. Despite the over 300 thousand observations in this dataset, I will carry out the tasks outlined that parallel the data science process detailed in the alternative project to balance the difficulties in the following sections:
+
+* Data access: download the data set and load it into the R environment.
+* Data Munging: clean the missing values and transform the columns as necessary to select variables that support the hypothesis.
+* Data Visualization: use various exploratory data analysis and simple statistical techniques to gain a deep understanding of the data.
+understanding of the data.
+* Supervised Machine Learning: adopt the regression and random forest model to make
+predictions of housing price values based on the trained algorithm.
+
+## 1.2 Dataset Description  
+The dataset records one row per transaction of housing sale in Beijing from the 2011-2017 period scrapped from [Lianjia.com] and shared on [kaggle.com]. Most of the observations are traded in 2011-2017, some of them are traded in Jan 2018, and some are even earlier. It includes the variables URL, ID, Lng., Lat., community ID, trade time, DOM(Days on Market), followers, total price, price, square, number of living room, drawing room, kitchen and bathroom, building type, construction time, renovation condition, building structure, ladder ratio, elevator, property rights for five years, subway, district, and community average price.
+Since mapping the data on the map of Beijing is a big challenge, I removed the columns of latitude and longitude when accessing the data. All the other useless columns: URL, ID, and followers are not loaded, either. Therefore, there are 318851 observations of 21 variables loaded and the complete description of the features considered in this dataset are:
+
+* `Cid`: community ID;
+* `DOM`: active days on market;
+* `tradeTime`: the date of the transaction;
+* `totalPrice`: the final price of the house (10,000¥);
+* `price`: price per square meter of housing;
+* `square`: the square meter of the house;
+* `livingRoom`: the number of the living room (Supposed to be bedroom after I checked in Chinese);
+* `drawingRoom`: the number of drawing-room (Supposed to be living room after I checked in Chinese);
+* `kitchen`: the number of the kitchen;
+* `bathroom` the number of the bathroom;
+* `floor`: the location of the house in the building and the floor number of the housing;
+* `buildingType`: the type of building including (1) tower, (2) bungalow, (3)combination of plate and tower, (4)plate;
+* `constructionTime`: the year of building constructed;
+* `renovationCondition`: the condition of renovation including (1)other, (2)rough, (3)Simplicity, (4)hardcover;
+* `buildingStructure`: the building structure including (1)unknown, (2)mixed, (3)brick and wood, (4)brick and concrete, (5)steel, and (6)steel-concrete composite;
+* `ladderRatio`: the proportion between the number of residents on the same floor and number of the elevator of a ladder. It describes how many ladders a resident has on average;
+* `elevator` whether the housing (1) have or (0) not have an elevator;
+* `fiveYearsProperty`: whether the owner has the property for (1) less than or (0) more than 5 years (It's related to China restricted the purchase of houses policy);
+* `subway` : whether the housing is (1) close to subway or (0) not
+* `district` :(1)"DongCheng",(2)"FengTai",(3)"Yizhuang", (4)"DaXing", (5)"FangShang", (6)"ChangPing",(7)"ChaoYang",(8)"HaiDian",(9)"ShiJingShan",(10)"XiCheng",(11)"TongZhou",(12)"ShunYi",(13)"MenTouGou"
+* `commuityAverage` : the average price per square meter in the corresponding community;
+
+```{r setup, include=FALSE}
+library(knitr)
+library(ggplot2)
+library(dplyr)
+library(RColorBrewer)
+library(rgdal)
+library(corrplot)
+library(reshape2)
+library(gridExtra)
+library(lubridate)
+library(psych)
+library(reshape2)
+library(randomForest)
+library(fastDummies)
+
+setwd("C:/Users/scnn4/Desktop/final project")
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+df<-read.csv('new.csv',stringsAsFactors=F,fileEncoding="GBK") %>% select (-url,-id,-Lng,-Lat,-followers)
+```
+
+# Data Munging
+    In this section, I first performed a 'summary()' function on the data frame to display the data class, range of values for numeric variables, and levels for any factor variable.
+  
+```{r 2, echo=TRUE}
+summary(df)
+```
+
+## 2.1 Cleaning the missing values
+From the summary output, I found that the columns of `DOM`,`buildingType`,`elevator`,`fiveYearsProperty`,`subway`, and `communityAverage` have NAs. The biggest problem is that nearly half of the days on market are NA. The distribution of `DOM` shows that its minimum is 1 day on the market and 50% of the transactions staying under 6 days. It suggests that the transaction in Beijing is very fast-paced and thus, I consider that its missing value to supposed to be the value of 0 instead. To clean the missing values of `buildingType` then, I classify the NAs as the unknown group. 
+
+```{r 2-1-1, echo=TRUE}
+df$DOM[is.na(df$DOM)]<-0
+df$buildingType[is.na(df$buildingType)]<-5
+df$ladderRatio[df$ladderRatio==10009400] <- 1.0009400
+nrow(df[!complete.cases(df),])
+```     
+I finally got 495 rows of observations with NAs by performing the above function and I removed all these observations by performing a 'na.omit()' function since the little proportion of the observations would not affect the data largely. On the other hand, I found the maximum of the ladder ratio is 10009400, a huge outlier. I replaced the number with 1.0009400 after I inspected the original webpage. After cleaning the missing values, there are 318356 observations in this dataset.
+
+```{r 2-1-2 , echo=FALSE}
+df <- na.omit(df)
+```
+
+## 2.2 Transforming the Numeric Varaibles
+    From the summary output, I found that there are many columns with character supposed to be numeric variables. I converted them by performing `as.numeric` function. Besides, I added several new variables such as the age of the housing by the substruction of the construction year from the trading year. When converting the variable of `constructionTime`, I found 19283 rows of observations with "未知", the meaning of unknowns in Chinese and I imputed these missing values with the median of the rest numbers. Besides, I split the variable of `floor` as the location of the house floor in the building and the floor number of the housing. The types of the location of the house are at the bottom, lower, middle, upper, top and unknown floor of the building. After the transformation, I got 11 numeric variables and the descriptive statistics of these variables are shown in the below table. 
+
+```{r 2-2-1 , echo=FALSE}
+#Convert into numeric varaible
+df$livingRoom <- as.numeric(df$livingRoom)
+df$drawingRoom <- as.numeric(df$drawingRoom)
+df$bathRoom<- as.numeric(df$bathRoom)
+
+#Calculate the age of the house
+df$tradeyear <- sapply(df$tradeTime, function(x) strsplit(x,'-')[[1]][1])
+df$tradeTime <- as.POSIXct(df$tradeTime,tryFormats = "%Y-%m-%d")
+df$constructionTime [df$constructionTime == "未知"] <- median(as.numeric(df$constructionTime [df$constructionTime != "未知"]))
+df$age <- as.numeric(df$tradeyear) - as.numeric(df$constructionTime)
+df$tradeTime <- as.POSIXct(df$tradeTime,tryFormats = "%Y-%m-%d")
+
+#Split the variable of floor as buildingheight and floor
+df$floortype <- sapply(df$floor, function(x) strsplit(x," ")[[1]][1])
+df$floortype <- factor(df$floortype,labels=c("lower","bottom","top","upper","unknownfloor","middle"))
+df$floor <- as.numeric( sapply(df$floor, function(x) strsplit(x," ")[[1]][2]))
+
+knitr::kable(print(describe(df %>% select(price,totalPrice,square,floor,DOM,age,livingRoom,drawingRoom,kitchen,bathRoom,ladderRatio,communityAverage),fast=TRUE),digits=3))
+```
+
+## 2.3 Relabeling the Categorial Variables
+    In this section, I converted the rest of categorical variables into factors labeled in the data description and I drew multiple pie charts to get a sense of the distribution of these factors. There are 6 levels in the location of floor type, 5 levels of the type of building, 4 levels in the renovation condition, 6 levels in the types of the building structure, 2 levels in the `elevator`, `subway` and `fiveYearsProperty` and 13 levers in the district in Beijing.  
+
+```{r 2-3-1, echo=FALSE, fig.height=9, fig.width=6}
+#labelling the factors
+df$buildingType <- factor(df$buildingType,levels = c(1,2,3,4,5),labels=c("Tower","Bungalow","combination of plate and tower","plate","unknowntype"))
+
+df$renovationCondition <- factor(df$renovationCondition,levels = c(1,2,3,4),labels=c("other","rough","simplicity","hardcover"))
+
+df$buildingStructure <- factor(df$buildingStructure,levels = c(1,2,3,4,5,6),labels=c("unknownstructure","mixed","brick and wood","brick and concrete","steel","steel-concrete composite"))
+
+df$elevator<- factor(df$elevator,levels = c(0,1),labels=c("without elevator","with elevator"))
+
+df$fiveYearsProperty<- factor(df$fiveYearsProperty,levels = c(0,1),labels=c("no less than 5 years","less than 5 years"))
+
+df$subway<- factor(df$subway,levels = c(0,1),labels=c("no subway","close to subway"))
+
+df$district <- factor(df$district,labels=c( "DongCheng","FengTai","YiZhuang", "DaXing", "FangShang", "ChangPing","ChaoYang","HaiDian","ShiJingShan","XiCheng","TongZhou","ShunYi","MenTouGou"))
+
+#Pie charts for each factor
+par(mfrow=c(4,2),mar=c(1,1,1,1))
+pie(table(df$floortype),col = gray(seq(0.2, 0.8, length =6)),main = "Floor Type")
+pie(table(df$buildingType),col = gray(seq(0.2, 0.8, length =4)),main = "Building Type")
+pie(table(df$renovationCondition),col = gray(seq(0.2, 0.8, length =4)),main = "Renovation Condition")
+pie(table(df$buildingStructure),col = gray(seq(0.2, 0.8, length =6)),main = "Building Structure")
+pie(table(df$elevator),col = gray(seq(0.2, 0.8, length =2)),main = "Elevator")
+pie(table(df$fiveYearsProperty),col = gray(seq(0.2, 0.8, length =2)),main = "Five Years Property")
+pie(table(df$subway),col = gray(seq(0.2, 0.8, length =2)),main = "Subway")
+pie(table(df$district),col = gray(seq(0, 0.91, length =13)),main = "District")
+```
+
+# Data Visualization
+  
+   After the transformation of the dataset, I got 12 numeric and 10 well-labeled categorial variables. In the following section, I did some exploratory data analysis (EDA) to gain a deeper understanding of the datasets. I drew multiple histograms to observe the distribution and a corrplot to check the correlation between the numeric variables.I made the plots of the relationship between housing prices and other numeric variables and boxplots of the effect of factors on housing prices.
+
+## 3.1 Histograms for each numeric variable
+
+   Histograms for each numeric variable could be shown to help us get a more intuitive sense of the distributions. From the below figure, it shows that the distributions of variables `price`, `house age` and `community mean` are much closer to the “bell shape”, but the distribution is all right-skewed, while other variables have extremely long tails. Therefore, transformation is needed to make it appear normal when predicting the housing price. The distribution of variables `living room`, `drawing room`,`kitchen`,`bathroom` are more similar to the one of the ordinal variables and it is questionable that these variables are converted into the factors with an order. I treated these variables as numeric variables in the prediction model like in the alternative project despite the issue.  
+
+```{r 3-1-1, echo=FALSE,fig.height=9,fig.width=6}
+p1 <- ggplot(df,aes(price))+ geom_histogram(fill="gray60",binwidth = 5000)+labs(x="price per square meter")
+p2 <- ggplot(df,aes(totalPrice))+ geom_histogram(fill="gray60",binwidth = 100)+labs(x="total price")
+p3 <- ggplot(df,aes(square))+ geom_histogram(fill="gray60",binwidth = 50)+labs(x="square meter")
+p4 <- ggplot(df,aes(floor))+ geom_histogram(fill="gray60",binwidth = 1)+labs(x="floor number")
+p5 <- ggplot(df,aes(DOM))+ geom_histogram(fill="gray60",binwidth = 2)+labs(x="days on market")
+p6 <- ggplot(df,aes(age))+ geom_histogram(fill="gray60",binwidth = 1)+labs(x="house age")
+p7 <- ggplot(df,aes(livingRoom))+ geom_histogram(fill="gray60",binwidth = 0.5)+labs(x="Bedroom room number")
+p8 <- ggplot(df,aes(drawingRoom))+ geom_histogram(fill="gray60",binwidth = 0.5)+labs(x="Livingroom Number")
+p9 <- ggplot(df,aes(kitchen))+ geom_histogram(fill="gray60",binwidth = 0.5)+labs(x="kitchen number")
+p10 <- ggplot(df,aes(bathRoom))+ geom_histogram(fill="gray60",binwidth = 0.5)+labs(x="bathroom number")
+p11 <- ggplot(df,aes(ladderRatio))+ geom_histogram(fill="gray60",binwidth =0.25)+labs(x="the ratio of laddder")
+p12 <- ggplot(df,aes(communityAverage))+ geom_histogram(fill="gray60",binwidth = 5000)+labs(x="coummunity mean")
+
+grid.arrange(p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,nrow=6)
+```
+    Since the rest of the variables have a long tail, the square root transformation by performing `sqrt()` is applied for the data. I took the column of `price` as an example and it is shown the square root transformation makes the distribution of the data appear more normal somewhat in the following figure. Therefore, it could be a compromise to take advantage of square root transformation to generate new variables in further analysis.
+
+```{r 3-1-2, echo=FALSE, fig.width=6}
+p13 <- ggplot(df,aes(price))+ geom_histogram(aes(y=..density..),binwidth = 100, fill="gray60")+ geom_density(color="gray6",size=1)+ geom_vline(aes(xintercept = median(df$price)),linetype=2)+labs(x="Price Before Transformation")
+
+p14 <- ggplot(df,aes(sqrt(price)))+ geom_histogram(aes(y=..density..),binwidth = 1, fill="gray60")+ geom_density(color="gray6",size=1)+geom_vline(aes(xintercept = median(sqrt(df$price))),linetype=2)+labs(x="Price After Transformation")
+
+grid.arrange(p13,p14,nrow=1)
+```
+
+
+## 3.2 Corrplot for the numeric variables
+    The corrplot below indicates the correlation between the numeric variables. The positive relationship is stronger as the color becomes green while the negative relationship is stronger as the color becomes dark blue. The round shape corresponds to the little relationship between variables. There are several interesting findings: 
+```{r 3-2, echo=FALSE,fig.width=6}
+df_numeric <- df %>% select(totalPrice,price,square,DOM,age,livingRoom,drawingRoom,kitchen,
+                            bathRoom,ladderRatio,communityAverage)
+corrplot(cor(df_numeric ,use = "pairwise.complete.obs",
+  method='pearson')
+  ,method='ellipse',
+  tl.cex=1,
+  col = viridis::viridis(50),
+  tl.col='black')
+```
+
+* `price` has a strong positive correlation with `totalPrice` and  `communityAverage` and it has some positive correlation with the date on the market and the age of the house. It is a little surprising that the older house has higher price values per square, like the antique.
+* The correlation of `totalPrice` with the other variables is much higher than the rest of the variables and it would be better to predict the total price of the house instead of the price per square of the house.
+* `square` variable has some positive correlation with `totalPrice` while some negative correlation with `price`. It suggests that the bigger house tends to have a lower price value per square.
+
+## 3.3 Sactterplot for the price 
+    To explore the further relationship of these numeric variables, I plotted several meaningful pairs of relationships throughout the trading years excluding data before 2010 and applied the transformation mentioned above into the used the data. The scatterplots are divided by every year because of the high density of the data and it also helps us check the yearly trend of the total price of the house.
+
+```{r 3-3-1, echo=FALSE,fig.width=6}
+ggplot(df[df$tradeyear>2009,], aes(sqrt(price),sqrt(totalPrice))) + geom_point(size=0.5) + geom_smooth(method = lm)+ facet_wrap(~tradeyear, scales = "free")
+```
+    The above scatterplots demonstrate the relationship between the transformed `price` and `totalPrice` and the trend line indicates the positive relationship between them. The points are more concentrated in the area with a higher price and total price meaning the houses in Beijing are very expensive.
+    
+```{r 3-3-2, echo=FALSE,fig.width=6}
+ggplot(df[df$tradeyear>2009,], aes(sqrt(square), sqrt(totalPrice))) + geom_point(size=0.5) + geom_smooth(method = lm)+ facet_wrap(~tradeyear, scales = "free")
+```
+    The above scatterplots demonstrate the relationship between the transformed `square` and `totalPrice` and the trend line indicates the positive relationship between them. The houses above 200 square meters are a relatively small proportion but much more expensive and thus some of the values are likely to be outliers in the model of predicting the total price of the house. The expanding of the limit on the y-axis shows indirectly that the rise of the total price throughout the nine years.   
+    
+```{r 3-3-3, echo=FALSE,fig.width=6}
+ggplot(df[df$tradeyear>2009,], aes(livingRoom, sqrt(totalPrice))) + geom_jitter(size=0.5,width = 0.5) + geom_smooth(method = lm)+ facet_wrap(~tradeyear, scales = "free")
+```
+    The above scatterplots demonstrate the relationship between the number of the bedroom and transformed  `totalPrice` and the trend line indicates the positive relationship between them. It is obvious that the more rooms the house has,  the bigger it is, the more expensive it is. The relationship of the `totalPrice` with the number of the living room and bathroom is similar to the above one. 
+    
+```{r 3-3-5, echo=FALSE,fig.width=6}
+ggplot(df[df$tradeyear>2009,], aes(sqrt(communityAverage), sqrt(totalPrice))) + geom_point(size=0.5) + geom_smooth(method = lm)+facet_wrap(~tradeyear, scales = "free")
+```
+    The above scatterplots demonstrate the relationship between the average of community price and `totalPrice` and the trend line indicates the positive relationship between them. Since the scatterplots all shows some positive relationship, it would be useful to consider these variable as the predictor in the building the model. 
+
+## 3.4 Boxplots for each Categorial Variables
+    To examine the effects of all the factors on the total price of the house, I drew the eight boxplots below to show the distribution of square-rooted `totalPrice` by each level of the factor. I found that there are still many outliers in the distributions and the majority of them are right-skewed. 
+
+```{r 3-4-1, echo=FALSE,fig.height=6, fig.width=6}
+p15 <- ggplot(df,aes(floortype,sqrt(totalPrice))) + geom_boxplot()+ labs (x = "Floor Type")+ coord_flip()  
+p16 <- ggplot(df,aes(buildingType,sqrt(totalPrice))) + geom_boxplot()+ labs (x = "Building Type")+ coord_flip() 
+p17 <- ggplot(df,aes(renovationCondition,sqrt(totalPrice))) + geom_boxplot()+ labs (x = "Renovation Condition")+ coord_flip()
+p18 <- ggplot(df,aes(buildingStructure,sqrt(totalPrice))) + geom_boxplot()+ labs (x = "Building Structure")+ coord_flip()
+
+grid.arrange(p15,p16,p17,p18,nrow=4)
+```
+
+ The above boxplots examined the effect of the `Floortype`,`BuildingType`,`renovationCondition`,and `buildingStructure` on the total price of the house. There is a mean difference within these four factors and I found that the houses at the top of the building are the least expensive among the other location of the house. The houses in the bungalow building type and the housed I the building made with brick and wood are the cheapest among the other categories. It makes sense that most of the bungalow building is made with brick and wood. Hardcover-renovated housing is the most expensive among the other categories.
+
+```{r 3-4-2, echo=FALSE,fig.height=8,fig.width=6}
+p19 <- ggplot(df,aes(elevator,sqrt(totalPrice))) + geom_boxplot()+ labs (x = "Elevator")+ coord_flip()
+p20 <- ggplot(df,aes(fiveYearsProperty,sqrt(totalPrice))) + geom_boxplot()+ labs (x = "Five Years Property")+ coord_flip()
+p21 <- ggplot(df,aes(subway,sqrt(totalPrice))) + geom_boxplot()+ labs (x = "Subway")+ coord_flip()
+p22 <- ggplot(df,aes(reorder(x=district,sqrt(totalPrice)),sqrt(totalPrice))) + geom_boxplot()+ labs (x = "District")+ coord_flip()
+grid.arrange(p19,p20,p21,p22,nrow=4)
+
+```
+    The above boxplots examined the effect of the `Floortype`,`BuildingType`,`renovationCondition`,and `buildingStructure` on the total price of the house. There is a mean difference within these four factors and I found that the houses with evalotor, less than five years and close to the subway are more expensive. After I reordered the district by the total price, XiCheng and DongCheng are the most expensive area in Beijing and it makes sense that both districts are the center area of Beijing. Mapping the data is a better way to examine the geographic effects on the total price in future analysis.
+
+## 3.5 Time trends for the average price per square
+
+```{r 3-5, echo=FALSE,fig.width=6}
+monthly_avg <- df %>%
+  group_by(month = lubridate::floor_date(tradeTime, unit = "month")) %>%
+  summarize(avg_price = mean(price)) %>% 
+  ungroup() %>%
+  filter(year(month) >= 2010)
+
+monthly_count <- df %>%
+  group_by(month = lubridate::floor_date(tradeTime, unit = "month")) %>%
+ count() %>% 
+  ungroup() %>%
+  filter(year(month) >= 2010)
+
+g1 <- ggplot(monthly_avg, aes(month, avg_price)) +
+  geom_line() +
+  geom_smooth() +
+  labs(y = "Average monthly price", x = "Month")
+
+g2 <- ggplot(monthly_count, aes(month, n)) +
+  geom_line() +
+  geom_smooth() +
+  labs(y = "Monthly Volumn", x = "Month")
+grid.arrange(g1,g2,nrow=2)
+```
+
+  The above figure plots the monthly average price vaues and the count for transactions to show the growth of the market volumn and price in Beijing housing market. Because of the imcomplete data before 2011, the trend is not obvious. However, the market grew every year and reached the peak around 2017. More time series analysis and the prediction based on the time will be more helpful in the future analysis.
+
+# Supervised Machine Learning
+
+## 4.1 Split Traning and Test Sets
+     In the following section, I build two models of regression and random forest based on the training set to predict the total price of the house on the testing set and compared them by evaulating the model performance. Besause of the large volumn of the data, I selected one district `HaiDian`with approciate amount of the data, around 38 thousand of observations to build the models. Since there are too many factors in the dataset, I removed the two factors related to the preperties of the building `BuildingType` and `BuidlingStructure` to speed up computer calculations. 
+
+```{r 4-1-1, echo=FALSE}
+## Binarize the factor variable
+haidian <- df[df$district=="HaiDian",]
+df_cleaned <- haidian %>% select(livingRoom,drawingRoom,kitchen,age,ladderRatio,communityAverage,elevator,floortype,subway,renovationCondition,fiveYearsProperty) %>%  mutate(totalprice=sqrt(haidian$totalPrice),square=sqrt(haidian$square),dom=sqrt(haidian$DOM)) 
+df_cleaned <- dummy_cols(df_cleaned,remove_first_dummy = TRUE)
+df_cleaned <- df_cleaned  %>% select(-elevator,-floortype,-subway,-renovationCondition,-fiveYearsProperty)
+
+# Split data set into training set and test set
+n <- nrow(df_cleaned)  
+ntrain <- round(n*0.8)    
+set.seed(314)            
+tindex <- sample(n, ntrain) 
+train <- df_cleaned[tindex,]  
+test <- df_cleaned[-tindex,]  
+```
+
+  Then I split the dataset into training and test set using a random sample index. I created a training set named train consisting of 80% of the rows while a test set named test consisting of 20% of the rows of the housing data frame. The variables used in the training are listed blow
+
+```{r 4-1-2, echo=FALSE}
+names(train)
+```
+
+## 4.2 Build the multiple regression model
+
+  I first trained the linear regression model to predict total housing values using all other predictors and all the categorical variable "type" are all encoded into dummy variables. The summary results are shown below and I found that 77.66% variability in the total housing price was account for the model of all predictors forecasting the values of housing price. Surprisingly, the predictors of `subway` don't have any effect on the total housing price. Besides, I made the 4 plots of regression diagnostics.
+
+```{r 4-2-1,echo=TRUE}
+m1 <- lm(totalprice~., data=train)
+summary(m1)
+```
+    The four residual V.S fitted, normal Q-Q, scale-location and residual V.S leverage plots show an acceptable distribution of the residuals and the four assumptions of the linear regression: linearity, independence, normality, and equality of variance has been verified as well.
+```{r 4-2-2,echo=FALSE,fig.width=6}
+par(mfrow=c(2,2))
+plot(m1)
+```
+
+  To evaluate the model, I first plotted the relationship between the predicted and actual total housing price in the test set shown below. Besides, the standard deviation of the residuals is evaluated to show how well the algorithm was able to predict the response variable. The function for calculating RMSE is defined as `sqrt(mean((y_hat-y)^2)`. 
+  
+```{r 4-2-3,echo=FALSE,fig.width=6}
+#predicted vs actual total housing price
+predict1 <- predict(m1, newdata=test)  
+plot(predict1,test$totalprice, xlab="predicted housing price", ylab="test housing price")
+abline(lm(predict1 ~ test$totalprice))
+
+#Define RMSE function
+rmse <- function(y_hat, y)
+{
+  return(sqrt(mean((y_hat-y)^2)))
+}
+```
+
+  Compared with the 'RMSE' of 2.59 for training set, the test set generates 'RMSE' score of only 2.62. The model scored roughly the same on the training and test data and it suggests that it made a good prediction. 
+
+```{r 4-2-4, echo=TRUE}
+# Calculate RMSE for training set
+rmse_train <- rmse(predict(m1),train$totalprice)
+rmse_train
+
+# Calculate RMSE for test set
+rmse_test <- rmse(predict(m1, newdata=test), 
+                  test$totalprice)
+rmse_test
+```
+
+## 4.3 Build the Radom Forest
+  Next，I adopted the `randomForest()` algorithm for training and inference. I construct 500 decision trees for this random forest to achieve good performance. The `rf$importance` is displayed below to indicate the importance of given predictors in the performance of the model by checking the number of mean squared error.  
+
+```{r 4-3-1, echo=FALSE,fig.width=6}
+# Train randomForest to predict housing price using all predictors
+rf = randomForest(x=train[,-7], y=train[,7],
+ ntree=500, importance=TRUE)
+
+rf$importance[order(rf$importance[,2], decreasing = T),]
+varImpPlot(rf)
+
+```
+    The out-of-bag (oob) error estimate in this random forrest is 1.99 and the resulting RMSE is the prediction of total price of a house in a given district to within a RMSE delta of the actual total house pric.If applying into the test se, the RMSE is 2.06. The model scored roughly the same on the training and test data and it suggests that it made a good prediction. 
+    
+```{r 4-3-2, echo=TRUE}
+# Compute the out-of-bag (oob) error estimate
+oob_prediction <- predict(rf)
+train_mse <- mean(as.numeric((oob_prediction -train$totalprice)^2))
+oob_rmse = sqrt(train_mse)
+oob_rmse
+
+# Calculate RMSE for test set
+y_pred = predict(rf , test[,-7])
+test_mse = mean(((y_pred - test$totalprice)^2))
+sqrt(test_mse)
+```
+    Compared with the regression model, square, age, community and date on market are more important features in both models. The RMSE for the test set in the regression is higher than that in the random forest algorithm and it suggests that the random forest algorithm is a better fit predicting the total price of a house.
+
+
+# Limitation and Conclusion
+    One of the limitations in this analysis is the lack of data mapping and time series analysis, which helps us get a deeper understanding of the geographic and time effects on the housing price. With the mapping of the data, future work can be to visualize the variation of housing prices in each region, even in each community on the map of Beijing. On the other hand, we could consider predicting the values based on the previous time trends in the application time series analysis. Besides, I used the data within the district "HaiDian" to establish the prediction model and the rest of the districts can be analyzed in the future work as well. 
+    I adopted the variable of `totalPRICE` as the main response variable but the columns of `price` and `community average` are ought to be considered as well. I guess that the variable of `totalPRICE` is more affected by the interior property of the house while `price` and `community average`  are more influenced by the exterior environment of the community. This assumption requires future analysis to work on it.  
+    Although it is a quite general and exploratory analysis of the housing price in Beijing, I reach abundant information and conclusions. The total price and price values per square have a significant growth from 2010 to 2018 and there is a mean difference in the thirteen regions of Beijing. Like the square, the date on market and the number of the living room and bedroom increase, the total price and price values per square increase. The variables of the square, age, community and date on market are more influential features in both models predicting the total price of a house. We know that Beijing is the capital of China with the increasing population and the Winter Olympics will open in Beijing in 2020. With these factors, I believe the housing price in Beijing will still increase in Beijing.
